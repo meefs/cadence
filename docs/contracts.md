@@ -91,6 +91,13 @@ its outcome. Retry that same feedback after adjusting the solve. Once feedback
 is accepted, it stays learned even if a later `act` or teacher lesson refuses;
 do not submit that reward again.
 
+`Brain.wait` settles observations that arrive before an awaited outcome
+without taking it. The action keeps its forecasts, eligibility and situation,
+and its later outcome is credited as an immediate one would be; parameters,
+eligibility traces, memories and random state are unchanged until then. Only
+the activity and working trace advance, and the next state settles from them.
+An outcome reported under another `decision` is refused before any change.
+
 An adjoint is reverse-mode differentiation even when written explicitly in
 NumPy without an autograd tape. Equivalence with an equilibrium contrast must
 be established for the particular equations, parameters, phase limits and

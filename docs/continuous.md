@@ -294,8 +294,9 @@ outcome stays learned: retry with `live(observations)` alone. The read-only
 outcome, including a routine choice.
 
 When an action awaits feedback, omitting `reward` supplies zero, as in `step`;
-it does not represent a missing or delayed outcome. Wait for the body's actual
-outcome before advancing this stream. Youth and sustained arousal permit learning
+it does not represent a missing or delayed outcome. Do not advance this stream
+with `live` before the body's actual outcome; observations that arrive first go
+to [`wait`](#outcomes-that-arrive-later-wait). Youth and sustained arousal permit learning
 from successful outcomes too. The arousal statistics control sampling and
 eligibility outside the neural solve; they are not another settled patch or a
 certificate of task failure. Every answer still comes from the qualified graph,
@@ -324,6 +325,50 @@ using `actor_*` for reward rates and `learning_*` for teaching rates. It preserv
 acquired state and pending outcomes; arousal resets are explicit. Inspect effective
 settings with `brain.describe()` and keep the environment's stage in its own save.
 
+### Outcomes that arrive later: `wait`
+
+A body may report an action's outcome only after the stream has sensed more: an
+arm that needs several frames to finish a reach, or a reply that comes back over
+a network. `live` would take each of those frames as the outcome, zero when the
+reward is omitted, and credit the real outcome to whichever action it issued
+last. `wait` settles such a frame without taking an outcome or issuing an action:
+
+```python
+creature = Brain.compose(4, 2, modules=(16,), seed=0, arousal=True)
+action = creature.live(cues[[0]])
+owner = creature.decision                      # the action that owns the next outcome
+writes = creature.hippocampus.writes
+for frame in (cues[[1]], cues[[2]]):           # the reach is still under way
+    creature.wait(frame)
+assert creature.pending_feedback and creature.decision == owner
+assert creature.hippocampus.writes == writes   # no frame was taken as an outcome
+action = creature.live(cues[[3]], reward=[1.0], decision=owner)
+assert creature.decision == owner + 1          # the outcome was taken once
+```
+
+Waiting moves the stream's activity and working trace with what it senses and
+adds each settle's sweeps to `arousal.sweeps`; `last_settlement` reports it with
+`operation` `wait`. The awaited action keeps the forecasts made before it, its
+eligibility and the situation it was chosen in, so its outcome is credited as an
+immediate outcome would be: the same eligibility, forecast and associative
+record. Only the next state settles from where the stream now is, as do the next
+answer and `imagine`. Parameters, eligibility traces, memories, random state, the
+copy of the issued command and the arousal level and age do not change while
+waiting; eligibility and arousal advance with outcomes, not frames.
+
+`decision` is the arousal age at which `live` issued the awaited action, or
+`None` when no `live` action awaits an outcome. An outcome reported under any
+other decision raises `ValueError` and changes nothing, including the same
+outcome reported again once it was taken; pass it when a body or a network may
+deliver an outcome twice or late. Waiting has no deadline. An outcome that will
+never come is not a zero reward: acting again with `act` or `step` replaces the
+action without learning from it, and `reset` begins a new stream. A save during
+the wait resumes it.
+
+This is the custody of one awaited action in one stream. It does not establish
+better behavior from the additional sensing, the timing of a real body, several
+actions in flight, or that the body executed the action it was given.
+
 ## Reset and save
 
 `brain.reset()` clears live neural/eligibility state and the working trace,
@@ -338,8 +383,9 @@ resumed = Brain.load("continuing-brain.npz")
 ```
 
 Save/load includes parameters, critic, optimizers, traces, fast and persistent
-memory, random state, arousal and an action awaiting feedback. Resume the same rows and
-supply that action's actual outcome once. Save the environment separately.
+memory, random state, arousal, an action awaiting feedback and what a waiting
+stream has sensed since. Resume the same rows and supply that action's actual
+outcome once. Save the environment separately.
 If a pattern separator is used, its actual projection and running mean are
 saved too. Shapes, finite values and continuation state are validated on load.
 
@@ -347,8 +393,8 @@ saved too. Shapes, finite values and continuation state are validated on load.
 
 | Mechanism | Default in `Brain.compose` | Advances on |
 | --- | --- | --- |
-| Neural activity | Retained | Actual interaction |
-| Working trace | Included | Each admitted action's free state |
+| Neural activity | Retained | Actual interaction, including frames sensed by `wait` |
+| Working trace | Included | Each admitted action's free state and each `wait` |
 | Reward plasticity and demonstrations | Available through `step` | Actual outcomes and supplied current labels |
 | Arousal | Absent unless enabled, e.g. `arousal=True` | Each outcome `live` receives |
 | Fast/persistent associations | Included | Observed chosen-action outcomes |
@@ -357,7 +403,8 @@ saved too. Shapes, finite values and continuation state are validated on load.
 
 `Brain.build` is a separate configurable builder; its working trace is
 opt-in. No hidden thread drives either interface. Do not call `step` for every UI
-frame: it consumes a real transition. The application owns scheduling.
+frame: it consumes a real transition. Frames that a `live` stream senses before its
+outcome go to `wait`. The application owns scheduling.
 
 Advanced `Deliberator` search retains unfinished work across bounded `tick`
 calls using supplied actions, transition and evaluator. It does not automatically
