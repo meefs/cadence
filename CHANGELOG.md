@@ -2,18 +2,20 @@
 
 ## Unreleased
 
-- Add `Brain.wait` for an outcome that arrives after the stream has sensed more
-  ([#122](https://github.com/muellerberndt/cadence/issues/122): missing outcomes are
-  not evidence; delayed outcomes and save/load with feedback pending). A waiting
-  stream settles each observation and advances its working trace, while the awaited
-  `live` action keeps its forecasts, eligibility and situation. The outcome later
-  given to `live` is credited as an immediate outcome would be, and the next state
-  settles from where the stream is. Add `Brain.decision`, the arousal age at which
-  `live` issued the awaited action, and `live(..., decision=...)`, which refuses an
-  outcome reported under another number before any change. A stream saved while
-  waiting uses checkpoint format `cadence-generic/5`; lives that do not wait keep
-  their formats and contents. `ActorCritic.learn` takes the state to settle the next
-  state from (`warm`). Defaults, learning laws and existing calls are unchanged.
+- Add `Brain.wait` for an outcome that arrives after the stream has sensed more: an
+  awaited action's custody for one `live` stream
+  ([#111](https://github.com/muellerberndt/cadence/issues/111),
+  [#122](https://github.com/muellerberndt/cadence/issues/122)). A waiting stream settles
+  each observation and advances its working trace without taking an outcome; the
+  awaited action keeps its forecasts, eligibility and situation, so the outcome later
+  given to `live` is credited as an immediate outcome would be, while the next state
+  settles from where the stream is. Wait settles are reported by `last_settlement`,
+  outside arousal's counts. Add `Brain.decision_id`, the arousal age once `live` issued
+  the awaited action, and `live(..., decision_id=...)`, which refuses an outcome
+  reported under another identity before any change. A stream saved while waiting uses
+  checkpoint format `cadence-generic/5`; lives that do not wait keep their formats and
+  contents. `ActorCritic.learn` takes the state to settle the next state from (`warm`).
+  Defaults, learning laws and existing calls are unchanged; no behavioral gain is claimed.
 
 ## 0.80.0 — 2026-10-09
 

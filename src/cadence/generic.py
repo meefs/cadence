@@ -413,7 +413,9 @@ def _validate_life_state(meta: dict[str, Any], data: Mapping[str, Any], learner:
         raise ValueError("saved efference neurons and state require efference metadata")
     if efference is not None:
         if meta.get("format") not in ("cadence-generic/4", "cadence-generic/5"):
-            raise ValueError("an efference copy belongs to checkpoint format cadence-generic/4")
+            raise ValueError(
+                "an efference copy belongs to checkpoint formats cadence-generic/4 and /5"
+            )
         source, target = efference["source"], efference["target"]
         if (
             source != "motor"
@@ -580,15 +582,16 @@ class Brain:
         )
 
     @property
-    def decision(self) -> int | None:
+    def decision_id(self) -> int | None:
         """The identity of the ``live`` action that owns the next outcome, or None.
 
-        It is the stream's ``arousal.age`` once ``live`` issued that action, so every
-        action ``live`` issues in a life has its own number; ``wait`` does not change it,
-        and a saved brain keeps it. Actions that ``step`` or ``act`` issued have none.
-        Pass it to ``live(..., decision=...)`` so that an outcome reported twice, or late
-        for an action the stream has already moved past, is refused instead of being
-        credited to the action now awaiting one.
+        It is the stream's ``arousal.age`` once ``live`` issued that action (its first
+        action is 1), so every action ``live`` issues in a life has its own number;
+        ``wait`` does not change it, ``reset`` keeps the age, and a saved brain keeps it.
+        Actions that ``step`` or ``act`` issued have none. Pass it to
+        ``live(..., decision_id=...)`` so that an outcome reported twice, or late for an
+        action the stream has moved past, is refused instead of being credited to the
+        action now awaiting one.
         """
         lived, arousal = self._lived, self.arousal
         if (
@@ -1300,7 +1303,7 @@ class Brain:
         return self.act(x)
 
     def live(
-        self, observations: Any, *, reward: Any = None, done: Any = None, decision: Any = None
+        self, observations: Any, *, reward: Any = None, done: Any = None, decision_id: Any = None
     ) -> np.ndarray:
         """One moment of a continuing life: routine while outcomes match, repair when not.
 
@@ -1330,11 +1333,11 @@ class Brain:
 
         An omitted reward is a zero outcome, not a missing one. When the outcome
         comes later than the next observations, sense them with ``wait`` and report
-        the outcome here once it is observed: it is measured against the forecast,
-        and credited to the eligibility and the situation, of the moment the action
-        was chosen. ``decision`` names the action the outcome belongs to
-        (``Brain.decision``); any other number is refused with ``ValueError``
-        before anything changes.
+        the outcome here once it is observed: it is measured against the forecasts
+        made when the action was chosen, and credited to that action's eligibility and
+        situation as an immediate outcome would be. ``decision_id`` names the action
+        the outcome belongs to (``Brain.decision_id``); any other value is refused
+        with ``ValueError`` before anything changes.
         """
         arousal = self.arousal
         if arousal is None:
@@ -1351,8 +1354,8 @@ class Brain:
             lived = None  # another operation acted since; the brain's own pending action governs
         sampled = agent._pending is not None
         routine = lived is not None and not lived[3] and not sampled
-        if decision is not None:
-            self._owned(decision)
+        if decision_id is not None:
+            self._owned(decision_id)
         if not sampled and not routine and (reward is not None or done is not None):
             raise RuntimeError("feedback needs a preceding action; start with live(observations)")
         r = np.zeros(1) if reward is None else np.asarray(reward, dtype=float)
@@ -1485,20 +1488,23 @@ class Brain:
         working trace advances to that state. It issues no action and takes no outcome:
         the awaited action keeps the forecasts made before it, its eligibility and the
         situation it was chosen in, and ``live`` later credits its actual outcome to it
-        once. Parameters, the critic, eligibility traces, memories, random state, the
-        command copy and the arousal level and age stay as they were; eligibility and
-        arousal advance with outcomes, not with waiting. The settle's sweeps are added to
-        ``arousal.sweeps`` in the mode the awaited action was chosen in, and its report is
-        ``last_settlement`` with ``operation`` ``wait``.
+        once. Parameters, the critic, eligibility traces, associative memory, random
+        state, the command copy and the arousal state stay as they were: eligibility,
+        arousal, its age and youth advance with outcomes and live moments, and one
+        outcome is one temporal-difference step however many moments were waited. The
+        settle is reported by ``last_settlement`` with ``operation`` ``wait``; like the
+        work of a refused attempt, it is not part of ``arousal``'s counts.
 
-        This follows the stream of ``live``: one observation row, arousal genes and an
-        action awaiting its outcome. Waiting has no deadline. An outcome that will never
-        come is not a zero reward: acting again with ``act`` or ``step`` replaces the
-        action without learning from it, and ``reset`` begins a new stream. A refused
-        settle raises ``RuntimeError`` and changes nothing but ``last_settlement``.
+        This follows the stream of ``live``: one observation row and arousal genes
+        (``ValueError`` otherwise), and an action awaiting its outcome (``RuntimeError``
+        otherwise). The caller decides which moments are waited; the brain does not
+        choose to wait. There is no deadline. An outcome that will never come is not a
+        zero reward: ``act`` replaces the action without learning from it (``step``
+        would take a sampled action's omitted reward as a zero outcome), and ``reset``
+        begins a new stream. A refused settle raises ``RuntimeError`` and changes
+        nothing but ``last_settlement``.
         """
-        arousal = self.arousal
-        if arousal is None:
+        if self.arousal is None:
             raise ValueError(
                 "wait needs arousal genes; construct the brain with arousal=True"
             )
@@ -1512,31 +1518,31 @@ class Brain:
             )
         drive = self.stimulus(x)
         state = self._qualified(drive, self._activity(), operation="wait")
-        assert self._last_settlement is not None
         if self.working_memory is not None:
             self.working_memory.update(state)
         self._awaiting = (current, state)
-        arousal.waited(int(self._last_settlement["steps"]))
 
-    def _owned(self, decision: Any) -> None:
+    def _owned(self, decision_id: Any) -> None:
         """Refuse an outcome reported for an action other than the one awaiting it."""
         if (
-            isinstance(decision, (bool, np.bool_))
-            or not isinstance(decision, (int, np.integer))
-            or decision < 1
+            isinstance(decision_id, (bool, np.bool_))
+            or not isinstance(decision_id, (int, np.integer))
+            or decision_id < 1
         ):
-            raise ValueError("decision must be a positive integer read from Brain.decision")
-        awaited = self.decision
+            raise ValueError(
+                "decision_id must be a positive integer read from Brain.decision_id"
+            )
+        awaited = self.decision_id
         if awaited is None:
             raise ValueError(
-                f"decision {int(decision)} does not own an outcome: no action that live "
-                "issued awaits one; after an outcome was taken and the answer refused, "
-                "retry with live(observations) alone"
+                f"decision_id {int(decision_id)} does not own an outcome: no action that "
+                "live issued awaits one; after an outcome was taken and the answer "
+                "refused, retry with live(observations) alone"
             )
-        if int(decision) != awaited:
+        if int(decision_id) != awaited:
             raise ValueError(
-                f"decision {int(decision)} does not own the next outcome; "
-                f"the awaited action is decision {awaited}"
+                f"decision_id {int(decision_id)} does not own the next outcome; "
+                f"the awaited action is decision_id {awaited}"
             )
 
     def _awaited(self) -> BrainState | None:

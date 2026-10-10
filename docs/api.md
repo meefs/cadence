@@ -801,11 +801,12 @@ that recursive benefit or automatic reflective behavior has been learned.
     its actual outcome, including a routine `live` choice. Use this when
     handling a refusal to avoid submitting an already consumed outcome twice.
     `wait` keeps it.
-  - `decision`: read-only; the identity of the `live` action that owns the next
-    outcome, which is the `arousal.age` at which `live` issued it, or `None` when
-    no `live` action awaits one (an action `step` or `act` issued has none).
-    `wait` keeps it and save/load restores it. `live(..., decision=...)` refuses an
-    outcome reported under any other number.
+  - `decision_id`: read-only; the identity of the `live` action that owns the next
+    outcome, which is the `arousal.age` once `live` issued it (its first action is 1),
+    or `None` when no `live` action awaits one (an action `step` or `act` issued has
+    none). `wait` keeps it, `reset` keeps the age so numbers are not reused, and
+    save/load restores it. `live(..., decision_id=...)` refuses an outcome reported
+    under any other value.
   - `stimulus(observations, *, memory=True)`: the drive of a batch; with `memory`, the
     working memory, the efference copy and the hippocampal recall are added.
   - `step(observations, *, reward=None, done=None, teacher=None, salience=None, bootstrap=None)`:
@@ -841,7 +842,7 @@ that recursive benefit or automatic reflective behavior has been learned.
     state and pending actual outcomes remain unchanged. This predicts brain responses
     to supplied observations; use the separate `TemporalPatchNet.plan` interface for
     a learned external-world action/consequence model.
-  - `live(observations, *, reward=None, done=None, decision=None) -> actions`: one moment of a
+  - `live(observations, *, reward=None, done=None, decision_id=None) -> actions`: one moment of a
     continuing life on one stream, for a brain constructed with `arousal`. Reward and
     done concern the preceding action, as in `step`; omitted reward consumes a
     pending action as a zero-reward transition, not a missing outcome. A calm brain answers with the
@@ -870,7 +871,7 @@ that recursive benefit or automatic reflective behavior has been learned.
     An unrepresentable arousal update raises `ValueError`. For a routine action
     its feedback remains pending; after a sampled action's feedback was learned,
     the error says that feedback was accepted and must not be submitted again.
-    `decision` names the action the outcome belongs to (`Brain.decision`); a
+    `decision_id` names the action the outcome belongs to (`Brain.decision_id`); a
     malformed value, or any number other than the awaited action's, raises
     `ValueError` before anything changes, so an outcome reported twice, or late for
     an action that was replaced, is not credited to the action now awaiting one.
@@ -881,17 +882,20 @@ that recursive benefit or automatic reflective behavior has been learned.
     reading the working trace, the efference copy and associative recall, and
     advances the working trace to that state. No action is issued and no outcome is
     taken: the awaited action keeps its forecasts, eligibility and situation, and the
-    outcome later given to `live` (or `learn`) is credited to it as an immediate
-    outcome would be, with the next state settled from the state sensed last; `act`,
-    `step`, `imagine` and the next `live` answer also start from that state.
-    Parameters, the critic, eligibility traces, memories, random state, the efference
-    copy, `last_arousal` and the arousal level and age are unchanged. The settle's
-    sweeps are added to `arousal.sweeps` in the awaited action's mode, and
-    `last_settlement` reports it with `operation="wait"`. It needs arousal, one stream
-    and an action awaiting its outcome (`RuntimeError` otherwise); invalid
-    observations raise `ValueError`, and a settle that cannot qualify raises
+    outcome later given to `live` is credited to it as an immediate outcome would be,
+    with the next state settled from the state sensed last; a routine forecast, `act`,
+    `step` and `imagine` also start from that state, and a finished episode from rest.
+    Parameters, the critic, eligibility traces, associative memory, random state, the
+    efference copy, `last_arousal` and the arousal state are unchanged: arousal, its
+    age, youth and `need` advance with live moments, and one outcome is one
+    temporal-difference step however many moments were waited. `last_settlement` reports the settle with `operation="wait"`; like
+    the work of a refused attempt it is not part of arousal's counts. The caller
+    decides which moments are waited. Without arousal or with more than one stream
+    it raises `ValueError`, without an action awaiting its outcome `RuntimeError`;
+    invalid observations raise `ValueError`, and a settle that cannot qualify raises
     `RuntimeError` and changes nothing but `last_settlement`. There is no deadline:
-    `act` or `step` replaces the awaited action without learning from it.
+    `act` replaces the awaited action without learning from it, while `step`, like
+    `live`, takes a sampled action's omitted reward as a zero outcome.
     See [outcomes that arrive later](continuous.md#outcomes-that-arrive-later-wait).
   - `last_arousal: Mapping[str, Any] | None`: an immutable snapshot of the latest `live`
     moment: `mode` (`"routine"` or `"aroused"`), `level`, `error` (the unsigned
@@ -1026,8 +1030,6 @@ returns. `Brain.live` runs it; the classes can also be used alone.
   Other slots keep their base policy temperature; every slot remains available to
   the uniform selection on subsequent moments. `lived(sweeps, learning_sweeps=0)`
   counts one moment: `moments` and `sweeps` per mode, `learning_sweeps` and `age`.
-  `waited(sweeps)` adds the sweeps of a `Brain.wait` settle to the current mode's
-  `sweeps` without counting a moment or changing the age.
   `Brain.live` counts a moment when its action is issued; the work of a refused
   attempt is reported by `Brain.last_settlement` and `Brain.last_learning` and is
   absent from these counts.

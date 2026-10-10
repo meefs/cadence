@@ -329,41 +329,50 @@ settings with `brain.describe()` and keep the environment's stage in its own sav
 
 A body may report an action's outcome only after the stream has sensed more: an
 arm that needs several frames to finish a reach, or a reply that comes back over
-a network. `live` would take each of those frames as the outcome, zero when the
-reward is omitted, and credit the real outcome to whichever action it issued
-last. `wait` settles such a frame without taking an outcome or issuing an action:
+a network. Not calling the brain until the outcome arrives keeps that action's
+custody, but nothing sensed in between reaches the brain. Calling `live` per
+frame senses every frame, but takes each one as the outcome, zero when the reward
+is omitted, and takes the real outcome as the outcome of the last action issued.
+`wait` settles such a frame without taking an outcome or issuing an action:
 
 ```python
 creature = Brain.compose(4, 2, modules=(16,), seed=0, arousal=True)
 action = creature.live(cues[[0]])
-owner = creature.decision                      # the action that owns the next outcome
+owner = creature.decision_id                   # the action that owns the next outcome
 writes = creature.hippocampus.writes
 for frame in (cues[[1]], cues[[2]]):           # the reach is still under way
     creature.wait(frame)
-assert creature.pending_feedback and creature.decision == owner
+assert creature.pending_feedback and creature.decision_id == owner
 assert creature.hippocampus.writes == writes   # no frame was taken as an outcome
-action = creature.live(cues[[3]], reward=[1.0], decision=owner)
-assert creature.decision == owner + 1          # the outcome was taken once
+action = creature.live(cues[[3]], reward=[1.0], decision_id=owner)
+assert creature.decision_id == owner + 1       # the outcome was taken once
 ```
 
-Waiting moves the stream's activity and working trace with what it senses and
-adds each settle's sweeps to `arousal.sweeps`; `last_settlement` reports it with
-`operation` `wait`. The awaited action keeps the forecasts made before it, its
-eligibility and the situation it was chosen in, so its outcome is credited as an
-immediate outcome would be: the same eligibility, forecast and associative
-record. Only the next state settles from where the stream now is, as do the next
-answer and `imagine`. Parameters, eligibility traces, memories, random state, the
-copy of the issued command and the arousal level and age do not change while
-waiting; eligibility and arousal advance with outcomes, not frames.
+Waiting moves the stream's activity and working trace with what it senses;
+`last_settlement` reports each settle with `operation` `wait`, and like the work
+of a refused attempt it is not part of `arousal`'s counts, which still add up the
+readings of the live moments. The awaited action keeps the forecasts made before
+it, its eligibility and the situation it was chosen in, so its outcome is
+credited as an immediate outcome would be: the same eligibility, forecast and
+associative record. What settles next starts from where the stream now is: the
+outcome's next state, a routine forecast, an answer that replaces the action and
+`imagine`; a finished episode still starts from rest.
+Parameters, eligibility traces, associative memory, random state, the copy of
+the issued command and the arousal state do not change while waiting.
+Eligibility, arousal, its age, youth and `need` advance with live moments, and
+one outcome is one temporal-difference step however many frames were waited.
 
-`decision` is the arousal age at which `live` issued the awaited action, or
-`None` when no `live` action awaits an outcome. An outcome reported under any
-other decision raises `ValueError` and changes nothing, including the same
-outcome reported again once it was taken; pass it when a body or a network may
-deliver an outcome twice or late. Waiting has no deadline. An outcome that will
-never come is not a zero reward: acting again with `act` or `step` replaces the
-action without learning from it, and `reset` begins a new stream. A save during
-the wait resumes it.
+The caller decides which frames are waited, as the environment decides when an
+outcome is reported; the brain does not choose to wait, and this is not the
+learned behavior of waiting through a pause. `decision_id` is the arousal age
+once `live` issued the awaited action (its first action is 1), or `None` when no
+`live` action awaits an outcome. An outcome reported under any other identity
+raises `ValueError` and changes nothing, including the same outcome reported
+again once it was taken; pass it when a body or a network may deliver an outcome
+twice or late. Waiting has no deadline. An outcome that will never come is not a
+zero reward: `act` replaces the action without learning from it (`step`, like
+`live`, would take a sampled action's omitted reward as a zero outcome), and
+`reset` begins a new stream. A save during the wait resumes it.
 
 This is the custody of one awaited action in one stream. It does not establish
 better behavior from the additional sensing, the timing of a real body, several

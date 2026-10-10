@@ -165,8 +165,7 @@ class Arousal:
     """The arousal of one continuing stream: its level, what it is used to, and its work.
 
     ``outcome`` applies the law to one outcome. ``moments`` and ``sweeps`` count, per
-    mode, the moments lived and the settling sweeps of their answers and forecasts, and of
-    the moments ``Brain.wait`` sensed between them;
+    mode, the moments lived and the settling sweeps of their answers and forecasts;
     eligibility and feedback sweeps of aroused moments are counted in ``learning_sweeps``.
     ``reset`` begins another stream calm, with what the brain was used to forgotten and
     its age and work kept.
@@ -340,12 +339,6 @@ class Arousal:
         self.sweeps[mode] += int(sweeps)
         self.learning_sweeps += int(learning_sweeps)
         self.age += 1
-
-    def waited(self, sweeps: int) -> None:
-        """Count the settling sweeps of a moment sensed while an outcome is awaited, in the
-        mode the awaited action was chosen in. It answers nothing: it is not a lived moment
-        and the age is unchanged."""
-        self.sweeps[self.mode] += int(sweeps)
 
     # -- continuation
 
