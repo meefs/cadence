@@ -675,7 +675,7 @@ def test_a_slotted_action_waits_and_is_credited_as_an_immediate_one(tmp_path):
 
 
 def test_a_wait_on_the_torch_backend_credits_and_resumes_like_the_host(tmp_path):
-    pytest.importorskip("torch")
+    torch = pytest.importorskip("torch")
     brain = cd.Brain.compose(
         4, 2, modules=(8,), seed=0, working_memory_amplitude=0.3, backend="torch",
         arousal=cd.ArousalConfig(youth=40),
@@ -697,7 +697,18 @@ def test_a_wait_on_the_torch_backend_credits_and_resumes_like_the_host(tmp_path)
         np.testing.assert_array_equal(
             brain.live(x, reward=reward), resumed.live(x, reward=reward)
         )
-    assert brain.arousal.to_dict() == resumed.arousal.to_dict()
+    # The resumed brain settles from host copies of states the running brain holds on its
+    # device, so its running statistics can agree only to the kernel's rounding, as after
+    # any torch save and load. Counts, settings and actions agree exactly: a resume that
+    # dropped the sensed state shows in the learning sweeps.
+    rel = 1e-4 if brain.brain._torch.dtype == torch.float32 else 1e-7
+    kept, continued = brain.arousal.to_dict(), resumed.arousal.to_dict()
+    assert kept.keys() == continued.keys()
+    for name, value in kept.items():
+        if isinstance(value, float):
+            assert continued[name] == pytest.approx(value, rel=rel, abs=rel), name
+        else:
+            assert continued[name] == value, name
 
 
 # ---------------------------------------------------------------------------
