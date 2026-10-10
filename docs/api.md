@@ -806,7 +806,10 @@ that recursive benefit or automatic reflective behavior has been learned.
     or `None` when no `live` action awaits one (an action `step` or `act` issued has
     none). `wait` keeps it, `reset` keeps the age so numbers are not reused, and
     save/load restores it. `live(..., decision_id=...)` refuses an outcome reported
-    under any other value.
+    under any other value. Unlike the experimental population engine's
+    [`Reinforcement.feedback`](equilibrium/LIVE.md#preserve-execution-and-feedback-ownership),
+    naming the decision is optional, a repeated outcome raises instead of being
+    acknowledged again, and the executed action is not reported.
   - `stimulus(observations, *, memory=True)`: the drive of a batch; with `memory`, the
     working memory, the efference copy and the hippocampal recall are added.
   - `step(observations, *, reward=None, done=None, teacher=None, salience=None, bootstrap=None)`:
@@ -888,9 +891,15 @@ that recursive benefit or automatic reflective behavior has been learned.
     Parameters, the critic, eligibility traces, associative memory, random state, the
     efference copy, `last_arousal` and the arousal state are unchanged: arousal, its
     age, youth and `need` advance with live moments, and one outcome is one
-    temporal-difference step however many moments were waited. `last_settlement` reports the settle with `operation="wait"`; like
-    the work of a refused attempt it is not part of arousal's counts. The caller
-    decides which moments are waited. Without arousal or with more than one stream
+    temporal-difference step however many moments were waited: an event-time rule,
+    with a per-moment decay as a candidate gene against it. `last_settlement` reports
+    the settle with `operation="wait"`; like the work of a refused attempt it is not
+    part of arousal's counts, so add each wait's `steps` to them to total a stream's
+    work. The caller decides which moments are waited and supplies the link between
+    the late outcome and its action; a result that uses `wait` declares that link as
+    supplied, and a delay whose credit the brain is to learn is reported through
+    `live` moment by moment. Give the awaited outcome with an explicit `reward`: an
+    omitted reward is a zero outcome. Without arousal or with more than one stream
     it raises `ValueError`, without an action awaiting its outcome `RuntimeError`;
     invalid observations raise `ValueError`, and a settle that cannot qualify raises
     `RuntimeError` and changes nothing but `last_settlement`. There is no deadline:

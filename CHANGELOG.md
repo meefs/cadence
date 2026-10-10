@@ -15,6 +15,10 @@
   reported under another identity before any change. A stream saved while waiting uses
   checkpoint format `cadence-generic/5`; lives that do not wait keep their formats and
   contents. `ActorCritic.learn` takes the state to settle the next state from (`warm`).
+  The guide adds that the caller supplies a late outcome's link to its action, so a
+  delay whose credit the brain is to learn goes through `live`; that a wait follows
+  event time ([#116](https://github.com/muellerberndt/cadence/issues/116)); and how to
+  total a waiting stream's work.
   Defaults, learning laws and existing calls are unchanged; no behavioral gain is claimed.
 
 ## 0.80.0 — 2026-10-09

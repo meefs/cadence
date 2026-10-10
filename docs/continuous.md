@@ -340,27 +340,41 @@ creature = Brain.compose(4, 2, modules=(16,), seed=0, arousal=True)
 action = creature.live(cues[[0]])
 owner = creature.decision_id                   # the action that owns the next outcome
 writes = creature.hippocampus.writes
+waited = 0                                     # settling sweeps spent while waiting
 for frame in (cues[[1]], cues[[2]]):           # the reach is still under way
     creature.wait(frame)
+    waited += creature.last_settlement["steps"]
 assert creature.pending_feedback and creature.decision_id == owner
 assert creature.hippocampus.writes == writes   # no frame was taken as an outcome
-action = creature.live(cues[[3]], reward=[1.0], decision_id=owner)
+action = creature.live(cues[[3]], reward=[1.0], decision_id=owner)  # an explicit outcome
 assert creature.decision_id == owner + 1       # the outcome was taken once
+counted = sum(creature.arousal.sweeps.values()) + creature.arousal.learning_sweeps
+work = counted + waited                        # waits are outside arousal's counts
+assert work > counted > 0 and waited > 0
 ```
 
 Waiting moves the stream's activity and working trace with what it senses;
 `last_settlement` reports each settle with `operation` `wait`, and like the work
 of a refused attempt it is not part of `arousal`'s counts, which still add up the
-readings of the live moments. The awaited action keeps the forecasts made before
-it, its eligibility and the situation it was chosen in, so its outcome is
-credited as an immediate outcome would be: the same eligibility, forecast and
-associative record. What settles next starts from where the stream now is: the
-outcome's next state, a routine forecast, an answer that replaces the action and
-`imagine`; a finished episode still starts from rest.
+readings of the live moments. A stream's settling work is those counts plus the
+`steps` of every wait, as the example adds them. The awaited action keeps the
+forecasts made before it, its eligibility and the situation it was chosen in, so
+its outcome is credited as an immediate outcome would be: the same eligibility,
+forecast and associative record. What settles next starts from where the stream
+now is: the outcome's next state, a routine forecast, an answer that replaces the
+action and `imagine`; a finished episode still starts from rest.
 Parameters, eligibility traces, associative memory, random state, the copy of
 the issued command and the arousal state do not change while waiting.
 Eligibility, arousal, its age, youth and `need` advance with live moments, and
 one outcome is one temporal-difference step however many frames were waited.
+
+This is an event-time rule: a waited frame does not discount the outcome, fade
+eligibility or add to a want. In animals the eligibility of an action fades with
+the time that passes before its outcome; a per-frame decay is a candidate gene,
+with this rule as its control. Event time belongs to
+[#116](https://github.com/muellerberndt/cadence/issues/116), and irregular
+physical time is among the open delay items of
+[#111](https://github.com/muellerberndt/cadence/issues/111).
 
 The caller decides which frames are waited, as the environment decides when an
 outcome is reported; the brain does not choose to wait, and this is not the
@@ -369,10 +383,21 @@ once `live` issued the awaited action (its first action is 1), or `None` when no
 `live` action awaits an outcome. An outcome reported under any other identity
 raises `ValueError` and changes nothing, including the same outcome reported
 again once it was taken; pass it when a body or a network may deliver an outcome
-twice or late. Waiting has no deadline. An outcome that will never come is not a
+twice or late. Give the awaited outcome with an explicit `reward`: an omitted
+reward after a wait is a zero outcome, which `live` takes as that action's
+outcome. Waiting has no deadline. An outcome that will never come is not a
 zero reward: `act` replaces the action without learning from it (`step`, like
 `live`, would take a sampled action's omitted reward as a zero outcome), and
 `reset` begins a new stream. A save during the wait resumes it.
+
+The caller also supplies the link between a late outcome and the action it
+belongs to; the brain does not infer it. That fits an action still under way in
+the body or in a channel. Where the brain is to learn the link between a choice
+and its delayed consequence, as in the delayed key-door reward of
+[#111](https://github.com/muellerberndt/cadence/issues/111) or a cache dug up
+later, the moments in between are actions with outcomes of their own: report them
+through `live` and leave the credit to eligibility. A result obtained with `wait`
+declares the link as supplied by its adapter.
 
 This is the custody of one awaited action in one stream. It does not establish
 better behavior from the additional sensing, the timing of a real body, several

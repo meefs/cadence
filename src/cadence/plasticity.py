@@ -680,7 +680,15 @@ class ActorCritic:
                 kind = "phases"
         if device_kernel is not None:
             return self._learn_device(
-                device_kernel, first, second, value, reward, done, next_drive, bootstrap, observed,
+                device_kernel,
+                first,
+                second,
+                value,
+                reward,
+                done,
+                next_drive,
+                bootstrap,
+                observed,
                 warm,
             )
         if self._trace_device is not None:
