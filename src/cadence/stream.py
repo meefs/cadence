@@ -140,6 +140,55 @@ def columns(index: np.ndarray) -> slice | np.ndarray:
     return np.asarray(index, dtype=np.int64)
 
 
+def _left(p: np.ndarray) -> np.ndarray:
+    """The share of each slot a head's attention ``p`` leaves to the heads after it."""
+    return np.clip(1.0 - p, 0.0, 1.0)
+
+
+def _share(logits: np.ndarray, left: np.ndarray, mass: np.ndarray) -> np.ndarray:
+    """A later head's attention among competing heads: a slot can be read in full once per
+    moment, so the head takes of each slot at most the share ``left`` the heads before it left.
+    Its own attention (the softmax of ``logits`` over the slots something is left of) keeps its
+    shape where the share allows, ``w = min(left, lam p)``, and ``lam`` gives the head its
+    ``mass`` over the slots (with a null slot, its share stays the head's), or every share left
+    where that is less: what a taken slot cannot give goes to the slots the head prefers next. A
+    row whose slots the heads before took whole reads nothing.
+
+    The slots taken whole leave before the shares are taken, and the arithmetic is in logits:
+    the slots are capped in the order of ``log(left) - logit``, and a slot past the capped ones
+    takes its fraction of the attention left, ``exp(logit - logsumexp(logits from it on))``,
+    which lies in [0, 1] however far apart the logits are."""
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore", under="ignore"):
+        z = np.where(left > 0, logits, -np.inf)
+        open_ = np.isfinite(z)
+        mass = np.minimum(mass, np.where(open_, left, 0.0).sum(axis=1))
+        ratio = np.where(open_, np.log(np.where(open_, left, 1.0)) - np.where(open_, z, 0.0),
+                         np.inf)
+        order = np.argsort(ratio, axis=1, kind="stable")
+        lefts = np.take_along_axis(left, order, axis=1)
+        zs = np.take_along_axis(z, order, axis=1)
+        # with the k slots of least ratio capped at their shares, the rest share what mass
+        # remains in proportion to their attention; the first k whose next slot that share does
+        # not cap is the one
+        capped = np.cumsum(lefts, axis=1) - lefts
+        rest = np.logaddexp.accumulate(zs[:, ::-1], axis=1)[:, ::-1]  # log attention from k on
+        live = np.isfinite(rest)
+        unit = np.where(live, np.exp(zs - np.where(live, rest, 0.0)), 0.0)
+        fits = live & ((mass[:, None] - capped) * unit <= lefts)
+        found = fits.any(axis=1)
+        rows = np.arange(len(z))
+        first = np.where(found, np.argmax(fits, axis=1), z.shape[1])
+        k = np.minimum(first, z.shape[1] - 1)
+        spread = np.where(found, mass - capped[rows, k], 0.0)
+        log_rest = np.where(found, rest[rows, k], 0.0)
+        tail = np.arange(z.shape[1])[None, :] >= first[:, None]
+        shares = np.where(tail, spread[:, None] * np.exp(zs - log_rest[:, None]), lefts)
+        shares = np.where(np.isfinite(zs), np.clip(shares, 0.0, lefts), 0.0)
+        out = np.empty_like(shares)
+        np.put_along_axis(out, order, shares, axis=1)
+        return out
+
+
 @dataclass
 class Trace:
     """A quantity decaying across moments, kept per stream, entering the next settling run
@@ -510,12 +559,15 @@ class Recall:
     and an address map of its own, ``q_h = heard * x + x W_x^h + c W_c^h + b^h``, starting
     at zero: the heads differ at birth only in their ports' synapses, and no head is
     assigned what to read. Each head weighs the slots with its own address, and its port
-    holds its own mixture through the settle. The address lesson steps each head's map
-    through that head's own synapses, and reward eligibility (``contrast_rows``) keeps one
-    block of columns per head. One bank is written per moment, whatever the heads. With the
-    address map frozen (``address=0``) and no position term (``position=0``) every head reads
-    what head 0 reads; the position term is taught whatever ``address`` is, so with it the
-    heads can come to read differently.
+    holds its own mixture through the settle. The heads compete for the slots (``compete``,
+    the founder): a slot can be read in full once per moment, so the heads read in turn and
+    each after the first takes of every slot at most the share the heads before it left
+    (``_share``), and its lessons take that read as the prior. The address lesson steps each
+    head's map through that head's own synapses, and reward eligibility (``contrast_rows``)
+    keeps one block of columns per head. One bank is written per moment, whatever the heads.
+    Without competition (``compete=False``, the read before 0.91.3), with the address map
+    frozen (``address=0``) and no position term (``position=0``) every head reads what head 0
+    reads.
 
     With ``position`` P above 0 (a construction setting, founder 32; 0 builds none) every head also
     reads each slot's age,
@@ -587,6 +639,8 @@ class Recall:
     copy: float = 0.0
     tokens: tuple[int, ...] | None = None
     action: bool = False
+    # several heads read in turn, each from the share of every slot the heads before it left
+    compete: bool = True
     # the motor neurons a slot's command covers with ``action``: a brain passes its motor width
     actions: int = 0
     keys: np.ndarray = field(init=False, repr=False)
@@ -608,7 +662,7 @@ class Recall:
     # executed command, which shape the memory or the anatomy
     OPTIONS = (
         "address_step", "null", "address_reward", "window", "window_decay", "heads", "position",
-        "position_rate", "boundary", "copy", "tokens", "action",
+        "position_rate", "boundary", "copy", "tokens", "action", "compete",
     )
     CONSTRUCTION_OPTIONS = ("window", "window_decay", "heads", "position", "copy", "tokens",
                             "action")
@@ -667,7 +721,7 @@ class Recall:
             ):
                 raise ValueError("capacity must be an integer of at least 1")
             return int(value)
-        if name in ("next", "boundary", "action"):
+        if name in ("next", "boundary", "action", "compete"):
             if not isinstance(value, bool):
                 raise ValueError(f"{name} must be boolean")
             return value
@@ -928,8 +982,10 @@ class Recall:
         self.last: _Moment | None = None
         self._attended: np.ndarray | None = None  # the attention of the latest read
         # every head's address and attention of the latest read (head 0's are ``last.address``
-        # and ``attended``)
-        self._head_reads: tuple[tuple[np.ndarray, ...], tuple[np.ndarray | None, ...]] | None = None
+        # and ``attended``), and the writes the bank had then
+        self._head_reads: (
+            tuple[tuple[np.ndarray, ...], tuple[np.ndarray | None, ...], int] | None
+        ) = None
         self._private = False  # an imagined branch reads the slots and writes none
         # the latest content scores per address over the present slots (``_content``)
         self._contents: list[tuple[np.ndarray, np.ndarray]] = []
@@ -1429,20 +1485,58 @@ class Recall:
         addresses = [moment.address] + [
             self._address(moment, h) for h in range(1, self.heads)
         ]
-        attended: list[np.ndarray | None] = []
-        for h, address in enumerate(addresses):
-            p = self.weights(address, self.position_term(h, moment.inputs, moment.cortex))
+        attended = self._read(addresses, moment)
+        for h, p in enumerate(attended):
             if p is not None:
                 p.flags.writeable = False
-            attended.append(p)
-            if p is not None:
                 recall_columns, next_columns = self._head_columns[h]
                 out[:, recall_columns] = self.amplitude * _einsum("bm,bmc->bc", p, self.values)
                 if self.next:
                     out[:, next_columns] = self.amplitude * _einsum("bm,bmc->bc", p, self.nexts)
         self._attended = attended[0]  # the attention this read uses, kept past the write
-        self._head_reads = (tuple(addresses), tuple(attended)) if self.heads > 1 else None
+        # with several heads, every head's address and attention, and the writes the bank had
+        self._head_reads = (
+            (tuple(addresses), tuple(attended), self.writes) if self.heads > 1 else None
+        )
         return out
+
+    def _read(self, addresses: Sequence[np.ndarray], moment: _Moment) -> list[np.ndarray | None]:
+        """Every head's attention over the slots held now, head ``h`` at ``addresses[h]`` with
+        its position term at ``moment``: its own (``weights``), or among competing heads, each
+        after the first taking of every slot at most the share the heads before it left
+        (``_share``)."""
+        attended: list[np.ndarray | None] = []
+        left: np.ndarray | None = None  # each slot's share the heads before have left
+        competing = self.compete and self.heads > 1
+        for h, address in enumerate(addresses):
+            position = self.position_term(h, moment.inputs, moment.cortex)
+            p = self.weights(address, position)
+            if p is not None and competing:
+                if left is not None:
+                    held = None if self.held.all() else self.held
+                    logits = self._attention(address, self.keys, held, position)
+                    p = _share(logits, left, p.sum(axis=1))
+                left = _left(p) if left is None else left * _left(p)
+            attended.append(p)
+        return attended
+
+    def _lesson_reads(self, moment: _Moment) -> list[np.ndarray | None]:
+        """For each head's lesson, the attention it read the moment with where heads compete
+        (None for head 0, whose prior is its own attention, and without competition): the reads
+        ``stimulate`` kept while the bank holds what they read, else the read computed now,
+        before any lesson steps a map."""
+        if not (self.compete and self.heads > 1):
+            return [None] * self.heads
+        reads = self._head_reads
+        if reads is not None and len(reads) > 2 and reads[2] == self.writes and all(
+            r is not None for r in reads[1]
+        ):
+            attended = list(reads[1])
+        else:
+            attended = self._read(
+                [self._head_address(moment, h) for h in range(self.heads)], moment
+            )
+        return [None, *attended[1:]]
 
     def _address(self, moment: _Moment, head: int) -> np.ndarray:
         """Head ``head``'s address of a moment: its key and head 0's inputs through the head's
@@ -1671,6 +1765,8 @@ class Recall:
         movement = (plus - minus)[:, self.association]
         reports = []
         moved_positions = refused_positions = 0
+        # the attention every competing head read with, taken before any head's lesson steps
+        reads = self._lesson_reads(moment)
         for h in range(self.heads):
             d_value = self.readback(graph, "recall", movement, h)
             d_next = self.readback(graph, "next", movement, h) if self.next else None
@@ -1680,7 +1776,9 @@ class Recall:
             )
             # one reading of the rows for both steps: the address step changes neither the
             # address the read used nor this head's position term
-            found = self._row_steps(head_moment, rows, d_value, d_next, h)
+            found = self._row_steps(head_moment, rows, d_value, d_next, h, reads[h])
+            if found is None:  # no row moves (a competing head may have had nothing to read)
+                continue
             if self.address:
                 reports.append(
                     self._step(moment, rows, d_value, d_next, found=found) if h == 0
@@ -1726,7 +1824,10 @@ class Recall:
         that moved and the rows a refused step left as they were: a step that is not finite is
         refused and moves none."""
         if found is None:
-            found = self._row_steps(moment, rows, d_value, d_next, head)
+            # the shares a competing head read are its prior, as in ``learn``
+            found = self._row_steps(
+                moment, rows, d_value, d_next, head, self._lesson_reads(moment)[head]
+            )
         if found is None:
             return 0, 0
         _, x, c, _, _, _, target, prior = found
@@ -1779,7 +1880,10 @@ class Recall:
         it."""
         quiet = {"address_rows": 0.0, "address_error": 0.0, "address_refused": 0.0}
         if found is None:
-            found = self._row_steps(moment, rows, d_value, d_next, head)
+            # the shares a competing head read are its prior, as in ``learn``
+            found = self._row_steps(
+                moment, rows, d_value, d_next, head, self._lesson_reads(moment)[head]
+            )
         if found is None:
             return quiet
         _, x, c, key, error, step, _, _ = found
@@ -1811,14 +1915,17 @@ class Recall:
         d_value: np.ndarray,
         d_next: np.ndarray | None,
         head: int = 0,
+        read: np.ndarray | None = None,
     ) -> tuple[np.ndarray, ...] | None:
         """Each row's step of the address lesson before the average over rows: the rows of
         ``rows`` that move (a movement and a held slot), and at those rows the event ``x``,
         the cortex ``c``, the key, the error toward the named keys, the error bounded by
         the row's own energy, ``error * min(1, 1 / (address |z|^2))``, the attention ``p*``
         the lesson names and the log of the prior attention the address gave (head ``head``'s
-        position term in it). None when no row moves. The arithmetic is unchecked: a caller
-        checks what it keeps."""
+        position term in it). Among competing heads ``read`` is the attention the head read
+        with over every stream's slots (``_lesson_reads``), and it is the prior; a row it read
+        nothing at does not move. None when no row moves. The arithmetic is unchecked: a
+        caller checks what it keeps."""
         if len(rows) == len(self.keys):  # every stream, in order: the slots themselves
             values, nexts, keys, held = self.values, self.nexts, self.keys, self.held
         else:
@@ -1850,9 +1957,22 @@ class Recall:
                 held = held if everyone else held[moving]
                 logits = np.where(held, logits, -np.inf)
             # among the moments the address attended to: the attention is the prior
-            attention = self._attention(
-                q, keys, held if masked else None, self.position_term(head, x, c)
-            )
+            if read is None:
+                attention = self._attention(
+                    q, keys, held if masked else None, self.position_term(head, x, c)
+                )
+            else:  # a competing head's: the shares it read
+                attention = np.log(read[rows][moving])
+                alive = np.isfinite(attention).any(axis=1)
+                if not alive.any():
+                    return None
+                if not alive.all():  # the heads before took this row's slots whole
+                    moving[np.flatnonzero(moving)[~alive]] = False
+                    x, c, q, key, keys, logits, attention = (
+                        a[alive] for a in (x, c, q, key, keys, logits, attention)
+                    )
+                    if masked:
+                        held = held[alive]
             attention -= attention.max(axis=1, keepdims=True)
             attention -= np.log(np.exp(attention).sum(axis=1, keepdims=True))
             logits = logits + attention
@@ -1899,11 +2019,12 @@ class Recall:
         moment = self.last
         if moment is None or not self.slots or self.streams != batch or len(moment.key) != batch:
             return out
+        reads = self._lesson_reads(moment)
         for h in range(self.heads):
             d_value = self.readback(graph, "recall", movement, h)
             d_next = self.readback(graph, "next", movement, h) if self.next else None
             head_moment = moment._replace(address=self._head_address(moment, h))
-            found = self._row_steps(head_moment, np.arange(batch), d_value, d_next, h)
+            found = self._row_steps(head_moment, np.arange(batch), d_value, d_next, h, reads[h])
             if found is None:
                 continue
             moving, x, c, _, _, step, _, _ = found
@@ -1972,6 +2093,10 @@ class Recall:
             {name: getattr(self, name) for name in self.OPTIONS
              if getattr(self, name) != founders[name]}
         )
+        if self.heads > 1:
+            # always kept with several heads: a file saved before heads competed holds none,
+            # and loads with heads that read alike as they did
+            out["compete"] = self.compete
         if "tokens" in out:  # JSON-safe: a list, as a checkpoint keeps it
             out["tokens"] = list(out["tokens"])
         return out

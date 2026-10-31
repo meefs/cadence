@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.91.3 — 2026-10-31
+
+- Several recall heads compete for the slots (`recall_compete=True`, the founder). A slot can be
+  read in full once per moment: the heads read in turn, each takes of every slot at most the
+  share the heads before it left, keeps the shape of its own attention where the slots allow and
+  gives what a taken slot cannot give to the slots it prefers next (with its whole mass while
+  enough is left; a head whose slots were taken whole reads nothing). The shares are computed
+  from the logits, so the best slot left keeps its weight however far a taken slot outscored it.
+  The address and position lessons and reward's address eligibility take a competing head's
+  prior from the shares it read, kept from the read before any lesson steps a map; a head that
+  read nothing is not taught. Through 0.91.2 every head's address map started at zero, so every
+  head read what head 0 read, and the lesson, whose prior is the head's own attention, could not
+  move a head off a sharp shared read: the heads stayed on one moment (at `recall_address=0`
+  permanently). A deep brain of two heads (256/128/128, raw keys of 960 values, 960 slots per
+  stream, `recall_address=0`) read the same slot with both heads on 184 of 192 decisions at
+  weight 1.0, and at `recall_address=0.01` on 641 of 720. One head reads as before.
+  `recall_compete=False` keeps the earlier read and can be retuned in a living brain; a
+  checkpoint now always records the option for several heads, and a file of several heads saved
+  before 0.91.3 loads with `recall_compete=False`, continuing as it was saved; 0.91.2 and
+  earlier refuse a file of several heads saved by 0.91.3.
+
 ## 0.91.2 — 2026-10-30
 
 - Bind the recall memory's reused content products to its bank for the length of one public

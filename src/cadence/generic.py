@@ -1097,6 +1097,7 @@ def _validate_recall_state(
     settings.update({name: Recall.setting(name, recalled[name]) for name in Recall.OPTIONS
                      if name in recalled})
     settings["position"] = _saved_position(recalled, data)
+    settings["compete"] = _saved_compete(recalled)
     writes = recalled["writes"]
     if isinstance(writes, bool) or not isinstance(writes, int) or writes < 0:
         raise ValueError("invalid saved recall write count")
@@ -1204,6 +1205,15 @@ def _saved_position(recalled: dict[str, Any], data: Any) -> int:
     if any(name.startswith("recall/position_") for name in data):
         return int(Recall.options()["position"])
     return 0
+
+
+def _saved_compete(recalled: dict[str, Any]) -> bool:
+    """A saved memory's competing heads: the option as saved (a memory of several heads always
+    keeps it); a file of several heads saved before heads competed holds none and loads with
+    heads that read alike, as it was saved."""
+    if "compete" in recalled:
+        return bool(Recall.setting("compete", recalled["compete"]))
+    return bool(int(recalled.get("heads", 1)) == 1)
 
 
 def _removed_recall(name: str, value: Any) -> str:
@@ -2563,7 +2573,9 @@ class Brain:
         one without it.
         ``recall_capacity``, ``recall_next``, ``recall_window``,
         ``recall_window_decay``, ``recall_heads`` (several held heads over the one bank,
-        each with its own port and address map), ``recall_position``, ``recall_copy``,
+        each with its own port and address map; ``recall_compete``, a runtime option with
+        founder True, makes them read in turn, each taking of a slot at most the share the
+        heads before it left), ``recall_position``, ``recall_copy``,
         ``recall_tokens`` and ``recall_action`` are construction settings; the keys, the
         values and the address map follow the observation code's width, a brain's ``code``
         among the ways to bound it. The settings of 0.84.3 that this version removed
@@ -4803,6 +4815,7 @@ class Brain:
                             if name in recalled
                         },
                         "recall_position": _saved_position(recalled, data),
+                        "recall_compete": _saved_compete(recalled),
                     }
                 ),
             )
