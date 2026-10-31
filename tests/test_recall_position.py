@@ -15,6 +15,7 @@ import pytest
 from checkpoints import earlier
 
 import cadence as cd
+from cadence.stream import _share
 
 
 def composed(**options):
@@ -202,10 +203,15 @@ def test_the_term_and_the_weights_give_the_attention_the_read_used():
     assert any(np.abs(m).sum() > 0 for maps in recall.position_maps for m in maps)
     brain.stimulus(xs[24])  # the read addresses the moment and keeps its attention
     moment, attended = recall.last, recall.attended_heads
+    left = None
     for h in range(recall.heads):
         address = moment.address if h == 0 else recall._head_address(moment, h)
         term = recall.position_term(h, moment.event, moment.cortex)
-        np.testing.assert_allclose(recall.weights(address, term), attended[h])
+        p = recall.weights(address, term)
+        if left is not None:  # a competing head takes at most what the heads before it left
+            p = _share(p, left)
+        np.testing.assert_allclose(p, attended[h])
+        left = 1.0 - p if left is None else left * (1.0 - p)
         assert recall.position_map(h) is recall.position_maps[h]
     with pytest.raises(ValueError):
         recall.position_map(2)

@@ -1097,6 +1097,7 @@ def _validate_recall_state(
     settings.update({name: Recall.setting(name, recalled[name]) for name in Recall.OPTIONS
                      if name in recalled})
     settings["position"] = _saved_position(recalled, data)
+    settings["compete"] = _saved_compete(recalled)
     writes = recalled["writes"]
     if isinstance(writes, bool) or not isinstance(writes, int) or writes < 0:
         raise ValueError("invalid saved recall write count")
@@ -1204,6 +1205,15 @@ def _saved_position(recalled: dict[str, Any], data: Any) -> int:
     if any(name.startswith("recall/position_") for name in data):
         return int(Recall.options()["position"])
     return 0
+
+
+def _saved_compete(recalled: dict[str, Any]) -> bool:
+    """A saved memory's competing heads: the option as saved (a memory of several heads always
+    keeps it); a file of several heads saved before heads competed holds none and loads with
+    heads that read alike, as it was saved."""
+    if "compete" in recalled:
+        return bool(Recall.setting("compete", recalled["compete"]))
+    return bool(int(recalled.get("heads", 1)) == 1)
 
 
 def _removed_recall(name: str, value: Any) -> str:
@@ -4803,6 +4813,7 @@ class Brain:
                             if name in recalled
                         },
                         "recall_position": _saved_position(recalled, data),
+                        "recall_compete": _saved_compete(recalled),
                     }
                 ),
             )

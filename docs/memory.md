@@ -389,14 +389,31 @@ assert len(heads_brain.recall.attended_heads) == 2
 
 Each head is a copy of the held read: a read port of its own (the regions `recall_h` and
 `next_h`, wired into the association like the first) and an address map of its own, which
-starts at zero. The heads differ at birth only in their ports' synapses; nothing assigns a
-head what to read. The address lesson after a teaching step reads the association's movement
-back through each head's own synapses, so each head's map moves toward the records whose
-values would have helped through that head; reward eligibility at `recall_address_reward > 0`
+starts at zero. The heads compete for the slots (`recall_compete=True`, the founder): a slot
+can be read in full once per moment, so the heads read in turn and each takes of every slot
+at most the share the heads before it left. A head keeps the shape of its own attention where
+the slots allow and gives what a taken slot cannot give to the slots it prefers next, with
+its whole mass while enough is left; a head whose slots the heads before took whole reads
+nothing. At birth, with every address map at zero, head 0 reads the best-matching moment and
+head 1 the best of what head 0 left.
+
+The address lesson after a teaching step reads the association's movement back through each
+head's own synapses, so each head's map moves toward the records whose values would have
+helped through that head, among the shares it reads with; the movement is what the lesson
+still asks for once the heads have read. Reward eligibility at `recall_address_reward > 0`
 keeps one block per head. One bank is written per moment, and the heads read it before the
 settle and hold their reads through it, as one head does. With several heads the recipe
 learns the addresses (`recall_address=0.01`) at the Recall founder's
 `recall_temperature=0.25`.
+
+Before 0.91.3 the heads did not compete. Their maps start at zero, so every head read exactly
+what head 0 read, and the lesson's prior is the head's own attention: a sharp read (most of
+the attention on one slot) gave it no other slot to move toward, and the heads stayed on the
+same moment, at `recall_address=0` for good. On the stream of
+[the heads' tests](../tests/test_recall_heads.py) two heads without competition read the
+slot they share 1.83 times in one moment; competing, no slot more than once.
+`recall_compete=False` keeps the earlier read, and a file of several heads saved before
+0.91.3 loads with it, continuing as it was saved; `retune` changes it in a living brain.
 
 In the [held-heads benchmark](../benchmarks/attention/held_heads.py) each trial witnesses
 four facts `role -> value` with values drawn fresh, and one question asks for two of them in
@@ -983,6 +1000,7 @@ map.
 | `recall_address_reward` | `0.0` | retune | Rate at which reward trains the address map |
 | `recall_window`, `recall_window_decay` | `1`, `1.0` | construction | Window of the last k events, decay in (0, 1] |
 | `recall_heads` | `1` | construction | Heads reading the one bank, each with its own port and address map ([several heads](#several-heads-opt-in)) |
+| `recall_compete` | `True` | retune | Several heads read in turn, each taking of a slot at most the share the heads before it left; `False` reads every head on its own as before 0.91.3 (a file of several heads saved before 0.91.3 loads with it) |
 | `recall_position` | `32` | construction | Ages below it get a bucket each, older ones one per doubling; every head learns a term per bucket ([position](#position-how-long-ago-a-moment-happened)); `0` builds none |
 | `recall_position_rate` | `0.1` | retune | Rate of the position term's lesson step; `0.0` freezes it |
 | `recall_boundary` | `False` | retune | Each stream that begins holds a silent boundary slot whose next the first event teaches ([the episode's boundary](#episodes-keys-and-windows)); a retune applies from the next stream that begins |
