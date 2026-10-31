@@ -2573,7 +2573,9 @@ class Brain:
         one without it.
         ``recall_capacity``, ``recall_next``, ``recall_window``,
         ``recall_window_decay``, ``recall_heads`` (several held heads over the one bank,
-        each with its own port and address map), ``recall_position``, ``recall_copy``,
+        each with its own port and address map; ``recall_compete``, a runtime option with
+        founder True, makes them read in turn, each taking of a slot at most the share the
+        heads before it left), ``recall_position``, ``recall_copy``,
         ``recall_tokens`` and ``recall_action`` are construction settings; the keys, the
         values and the address map follow the observation code's width, a brain's ``code``
         among the ways to bound it. The settings of 0.84.3 that this version removed

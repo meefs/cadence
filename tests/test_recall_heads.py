@@ -112,6 +112,61 @@ def test_a_head_whose_slots_the_heads_before_took_reads_nothing():
     assert not drive[:, r1].any() and not drive[:, n1].any()
 
 
+def test_a_head_left_nothing_to_read_is_not_taught():
+    brain = witnessed(composed(heads=2, seed=9), STREAM[:1])
+    recall = brain.recall
+    maps = [tuple(a.copy() for a in recall.head_map(h)) for h in range(2)]
+    positions = [tuple(a.copy() for a in recall.position_map(h)) for h in range(2)]
+    report = brain.lesson(STREAM[1], np.array([1]))
+    assert not recall.attended_heads[1].any()  # head 0 took the one slot whole
+    assert report["address_rows"] == 1.0  # head 0's row alone
+    for a, b in zip(maps[1], recall.head_map(1), strict=True):
+        np.testing.assert_array_equal(a, b)
+    for a, b in zip(positions[1], recall.position_map(1), strict=True):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_the_share_keeps_its_mass_however_far_apart_the_logits():
+    from cadence.stream import _share
+
+    with np.errstate(divide="ignore"):
+        # one slot taken whole, two left some 725 nats below it: their attention underflows
+        far = _share(np.array([[0.0, -724.8, -724.5]]), np.array([[0.0, 1.0, 1.0]]), np.ones(1))
+        np.testing.assert_allclose(far, [[0.0, 1 / (1 + np.exp(0.3)), 1 / (1 + np.exp(-0.3))]])
+        # the head's best slot partly taken, the rest of its mass to a tail of tiny attention
+        logits = np.array([[0.0, -650.0, -700.0, -740.0]])
+        left = np.array([[0.07, 0.36, 0.006, 0.88]])
+        shares = _share(logits, left, np.array([0.737]))
+    assert np.all(shares <= left + 1e-15)
+    np.testing.assert_allclose(shares.sum(), 0.737)
+    np.testing.assert_allclose(shares[0, :3], left[0, :3])
+    np.testing.assert_allclose(shares[0, 3], 0.737 - left[0, :3].sum())
+
+
+def test_a_competing_head_learns_from_the_shares_it_read():
+    brain = witnessed(composed(heads=2, seed=10))
+    recall = brain.recall
+    brain.stimulus(STREAM[1])
+    read = recall.attended_heads[1]
+    assert recall._lesson_reads(recall.last)[1] is read  # noqa: SLF001
+    # without competition a head's prior is its own attention, recomputed in its lesson
+    alike = witnessed(composed(heads=2, seed=10, recall_compete=False))
+    alike.stimulus(STREAM[1])
+    assert alike.recall._lesson_reads(alike.recall.last) == [None, None]  # noqa: SLF001
+
+
+def test_a_null_slot_keeps_its_share_of_every_competing_head():
+    brain = witnessed(composed(heads=2, recall_null=0.0))
+    recall = brain.recall
+    recall.stimulate(np.zeros((1, brain.connectome.n)), STREAM[0])
+    first, second = recall.attended_heads
+    own = recall.weights(recall._head_address(recall.last, 1),  # noqa: SLF001
+                         recall.position_term(1, recall.last.inputs, recall.last.cortex))
+    assert first.sum() < 1.0
+    np.testing.assert_allclose(second.sum(), own.sum())
+    assert np.all(first + second <= 1.0 + 1e-12)
+
+
 def test_competing_heads_never_read_a_moment_twice_through_lessons():
     most, overlap = {}, {}
     for compete in (True, False):

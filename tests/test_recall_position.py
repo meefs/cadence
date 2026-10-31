@@ -209,7 +209,8 @@ def test_the_term_and_the_weights_give_the_attention_the_read_used():
         term = recall.position_term(h, moment.event, moment.cortex)
         p = recall.weights(address, term)
         if left is not None:  # a competing head takes at most what the heads before it left
-            p = _share(p, left)
+            logits = recall._attention(address, recall.keys, None, term)
+            p = _share(logits, left, p.sum(axis=1))
         np.testing.assert_allclose(p, attended[h])
         left = 1.0 - p if left is None else left * (1.0 - p)
         assert recall.position_map(h) is recall.position_maps[h]

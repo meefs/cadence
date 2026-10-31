@@ -432,8 +432,9 @@ decision in which one fact matters only together with another is not covered, an
 is a continuing-world result.
 
 The heads' addresses learn from teaching steps; reward trains them only at
-`recall_address_reward` above zero. In a life of rewards alone, with the founder 0, every head
-keeps reading what head 0 reads.
+`recall_address_reward` above zero. In a life of rewards alone, with the founder 0, the address
+maps stay at zero: head 0 reads the best-matching moment and each later head the best of what
+the heads before it left (with `recall_compete=False`, what head 0 reads).
 
 Use several heads when one answer needs several witnessed facts at once, and compare them with
 one head and with the facts asked one per moment (one head reads one fact per moment through
