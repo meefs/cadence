@@ -1824,7 +1824,10 @@ class Recall:
         that moved and the rows a refused step left as they were: a step that is not finite is
         refused and moves none."""
         if found is None:
-            found = self._row_steps(moment, rows, d_value, d_next, head)
+            # the shares a competing head read are its prior, as in ``learn``
+            found = self._row_steps(
+                moment, rows, d_value, d_next, head, self._lesson_reads(moment)[head]
+            )
         if found is None:
             return 0, 0
         _, x, c, _, _, _, target, prior = found
@@ -1877,7 +1880,10 @@ class Recall:
         it."""
         quiet = {"address_rows": 0.0, "address_error": 0.0, "address_refused": 0.0}
         if found is None:
-            found = self._row_steps(moment, rows, d_value, d_next, head)
+            # the shares a competing head read are its prior, as in ``learn``
+            found = self._row_steps(
+                moment, rows, d_value, d_next, head, self._lesson_reads(moment)[head]
+            )
         if found is None:
             return quiet
         _, x, c, key, error, step, _, _ = found

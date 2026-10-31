@@ -112,19 +112,22 @@ PYTHONPATH=src python benchmarks/attention/look_back.py --out /tmp/look-back.jso
 bank through k copies of the held read, each with its own port and learned address. The
 [held-heads benchmark](held_heads.py) asks for two of four witnessed facts in one settle,
 reported in two slots (six values) or combined into one action (ten positions), with both
-orders of some value pairs never taught. Its four-founder
-[receipt](results/held-heads.json):
+orders of some value pairs never taught. Its four-founder receipt with competing heads
+([0.91.3](results/held-heads-competing.json), `CADENCE_FUSED=0`, one thread; the retained
+[receipt](results/held-heads.json) is the run before heads competed):
 
 | Task | Two heads, taught pairs | Two heads, untaught pairs | One head, taught pairs | Uniform random |
 | --- | --- | --- | --- | --- |
-| Report two facts | 1.00 on every founder | 0.79, 0.77, 0.98, 0.82 | 0.21 to 0.24 | 0.03 |
-| One action from two facts | 1.00 on every founder | 0.96, 0.96, 0.97, 0.98 | 0.59 to 0.76 | 0.10 |
+| Report two facts | 1.00 on every founder | 0.85, 0.77, 0.98, 0.82 | 0.21 to 0.24 | 0.03 |
+| One action from two facts | 1.00 on every founder | 0.98, 0.99, 0.98, 0.98 | 0.59 to 0.76 | 0.10 |
 
-The original heads prefer different role records on every trial, with no refusal; that
-receipt's metric compared only the role-record columns, and did not retain whole-bank
-maxima. One head learns its
+The heads compete for the slots (0.91.3, `recall_compete`). Under 0.91.2, with the same
+settings (`CADENCE_FUSED=0`, one thread), the untaught pairs read 0.79, 0.77, 0.98, 0.82 and
+0.96, 0.96, 0.97, 0.98, the one-head arm identically to the row above, every taught pair 1.00.
+The heads prefer different role records on every trial, with no refusal. One head learns its
 address at the same settings. Lessons switch to the brain's wrong rows once its running share
-of wrong answers falls below 0.02 (lesson 176 to 415). Misses of the reporting slots on
+of wrong answers falls below 0.02 (lesson 176 to 626; under 0.91.2 176 to 415, the one action
+later on two founders and sooner on two). Misses of the reporting slots on
 untaught pairs all give the other asked value (`other_asked_value` equals `wrong_slots`); a
 single action generalizes. The result is
 recomputed at its original source and metric scope by `test_held_heads.py`. Current runs

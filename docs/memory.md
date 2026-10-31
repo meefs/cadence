@@ -422,10 +422,11 @@ values), two heads answer every taught pair on four founders, and on every trial
 attends most to a different fact; one head that learns its address the same way answers 21 to
 24% of the taught pairs, uniform random 3%. Combined into one action (go to the food unless the predator stands at an odd position,
 then to the position five steps from it; ten positions), two heads answer every taught pair
-and 96 to 98% of the food and predator pairs they were never taught; one head answers 59 to
+and 98 to 99% of the food and predator pairs they were never taught; one head answers 59 to
 76% of the taught pairs, uniform random 10%. The two reporting slots answer 77 to 98% of the pairs never taught;
 every wrong slot on those pairs gave the other asked value, a binding the shared association
-never met.
+never met. These are competing heads (0.91.3); without competition (0.91.2, the same settings) the
+one action answered 96 to 98% of the untaught pairs and the reporting slots 77 to 98%.
 The [receipt](../benchmarks/attention/results/held-heads.json) is recomputed by the
 regression suite. This is component evidence for reading several facts in one settle; a
 decision in which one fact matters only together with another is not covered, and nothing here
